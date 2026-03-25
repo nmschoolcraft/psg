@@ -33,8 +33,6 @@ jobs:
 
       - name: Sync NEXT_PUBLIC env vars to Vercel project
         run: |
-          # Upsert build-time env vars into Vercel project so remote
-          # build has access to them (NEXT_PUBLIC_* are baked at build time)
           node - <<'EOF'
           const https = require('https')
 
@@ -49,18 +47,13 @@ jobs:
           ]
 
           async function upsertEnvVar(v) {
-            const teamParam = TEAM_ID.startsWith('team_') ? `?teamId=${TEAM_ID}` : ''
-
-            // First list existing env vars to find the ID if it exists
+            const teamParam = TEAM_ID && TEAM_ID.startsWith('team_') ? `?teamId=${TEAM_ID}` : ''
             const list = await req('GET', `/v9/projects/${PROJECT_ID}/env${teamParam}`)
             const existing = (list.envs || []).find(e => e.key === v.key && e.target && e.target.includes('production'))
-
             if (existing) {
-              // PATCH to update
               await req('PATCH', `/v9/projects/${PROJECT_ID}/env/${existing.id}${teamParam}`, { value: v.value, target: ['production'] })
               console.log(`Updated ${v.key}`)
             } else {
-              // POST to create
               await req('POST', `/v9/projects/${PROJECT_ID}/env${teamParam}`, { key: v.key, value: v.value, target: ['production'], type: 'plain' })
               console.log(`Created ${v.key}`)
             }
@@ -69,17 +62,13 @@ jobs:
           function req(method, path, body) {
             return new Promise((resolve, reject) => {
               const options = {
-                hostname: 'api.vercel.com',
-                path,
-                method,
+                hostname: 'api.vercel.com', path, method,
                 headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
               }
               const r = https.request(options, res => {
                 let d = ''
                 res.on('data', c => d += c)
-                res.on('end', () => {
-                  try { resolve(JSON.parse(d)) } catch { resolve(d) }
-                })
+                res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve(d) } })
               })
               r.on('error', reject)
               if (body) r.write(JSON.stringify(body))
@@ -87,11 +76,9 @@ jobs:
             })
           }
 
-          Promise.all(vars.map(upsertEnvVar)).then(() => {
-            console.log('All env vars synced')
-          }).catch(e => {
-            console.error('Env sync error (non-fatal):', e.message)
-          })
+          Promise.all(vars.map(upsertEnvVar))
+            .then(() => console.log('All env vars synced'))
+            .catch(e => console.error('Env sync error (non-fatal):', e.message))
           EOF
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -99,4 +86,25 @@ jobs:
           SUPABASE_ANON_VAL: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
       - name: Deploy (remote build on Vercel)
-        run: npx vercel@latest --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
+        id: vercel-deploy
+        run: |
+          npx vercel@latest --prod --yes --token=${{ secrets.VERCEL_TOKEN }} \
+            2>&1 | tee /tmp/vercel_output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Report deploy result (success or error)
+        if: always()
+        run: |
+          OUTPUT=$(cat /tmp/vercel_output.txt 2>/dev/null | tail -80)
+          SHA="${{ github.sha }}"
+          STATUS="${{ steps.vercel-deploy.outputs.exit_code }}"
+          MSG="[$SHA] exit=$STATUS\n$OUTPUT"
+          # Post to ntfy.sh topic for debugging
+          printf '%s' "$MSG" | curl -s -X POST "https://ntfy.sh/psg-vercel-deploy-8x7k2" \
+            -H "Content-Type: text/plain" \
+            --data-binary @- || true
+
+      - name: Fail if deploy failed
+        if: steps.vercel-deploy.outputs.exit_code != '0'
+        run: exit 1
