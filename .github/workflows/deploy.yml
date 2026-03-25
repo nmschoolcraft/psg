@@ -85,6 +85,11 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"name":"portal.psgweb.me"}')
           echo "Domain link response: $RESP"
+          # Report to ntfy for debugging
+          printf 'domain-link SHA=%s PROJ=%s\nRESP=%s' \
+            "${{ github.sha }}" "$VERCEL_PROJECT_ID" "$RESP" \
+            | curl -s -X POST "https://ntfy.sh/psg-vercel-deploy-8x7k2" \
+              -H "Content-Type: text/plain" --data-binary @- || true
         continue-on-error: true
 
       - name: Disable Vercel SSO/Authentication protection
