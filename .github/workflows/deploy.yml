@@ -48,23 +48,35 @@ jobs:
           NEXT_PUBLIC_APP_URL: https://portal.psgweb.me
 
       - name: Deploy prebuilt to Vercel
-        id: deploy
+        run: npx vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Disable Vercel SSO/Authentication protection
         run: |
-          npx vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} \
-            2>&1 | tee /tmp/deploy_output.txt
-          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          node - <<'EOF'
+          const https = require('https')
+          const TOKEN = process.env.VERCEL_TOKEN
+          const PROJECT_ID = process.env.VERCEL_PROJECT_ID
+          const TEAM_ID = process.env.VERCEL_ORG_ID
+          const teamParam = TEAM_ID && TEAM_ID.startsWith('team_') ? `?teamId=${TEAM_ID}` : ''
+
+          const options = {
+            hostname: 'api.vercel.com',
+            path: `/v9/projects/${PROJECT_ID}${teamParam}`,
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+          }
+          const req = https.request(options, res => {
+            let d = ''
+            res.on('data', c => d += c)
+            res.on('end', () => {
+              const r = JSON.parse(d)
+              console.log(`HTTP ${res.statusCode} — ssoProtection: ${JSON.stringify(r.ssoProtection)}`)
+            })
+          })
+          req.on('error', e => console.error('API error (non-fatal):', e.message))
+          req.write(JSON.stringify({ ssoProtection: null }))
+          req.end()
+          EOF
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         continue-on-error: true
-
-      - name: Report result
-        if: always()
-        run: |
-          OUTPUT=$(cat /tmp/deploy_output.txt 2>/dev/null | tail -60)
-          SHA="${{ github.sha }}"
-          STATUS="${{ steps.deploy.outputs.exit_code }}"
-          printf '[%s] exit=%s\n%s' "$SHA" "$STATUS" "$OUTPUT" \
-            | curl -s -X POST "https://ntfy.sh/psg-vercel-deploy-8x7k2" \
-              -H "Content-Type: text/plain" --data-binary @- || true
-
-      - name: Fail if deploy failed
-        if: steps.deploy.outputs.exit_code != '0'
-        run: exit 1
