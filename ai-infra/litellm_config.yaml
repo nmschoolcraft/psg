@@ -1,0 +1,59 @@
+# LiteLLM Proxy Configuration — PSG Advantage Platform v2
+# Self-hosted at port 4000.
+# Model routing for content generation, CSI analysis, and embedding workloads.
+#
+# Deploy: litellm --config ai-infra/litellm_config.yaml --port 4000
+# Docs:   https://docs.litellm.ai/docs/proxy/configs
+
+model_list:
+
+  # ── Primary: Claude claude-sonnet-4-6 — content generation ─────────────────────
+  # Used for: CSI response drafts, repair summary generation, marketing copy.
+  # Cost tier: medium. Best quality-to-cost for structured output.
+  - model_name: content-generation
+    litellm_params:
+      model: claude/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 2048
+      temperature: 0.7
+
+  # ── Fallback: Claude Haiku — high-volume classification tasks ──────────────
+  # Used for: pay-type classification, short label extraction, filtering.
+  - model_name: fast-classify
+    litellm_params:
+      model: claude/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 512
+      temperature: 0.0
+
+  # ── Embeddings: text-embedding-3-small (OpenAI) ────────────────────────────
+  # Used for: Qdrant shop_content collection, RAG pipeline.
+  # 1536-dim vectors; good cost/quality for retrieval.
+  - model_name: embeddings
+    litellm_params:
+      model: text-embedding-3-small
+      api_key: os.environ/OPENAI_API_KEY
+
+router_settings:
+  routing_strategy: usage-based-routing   # distribute load, avoid rate limits
+  num_retries: 2
+  timeout: 30
+  retry_after: 5
+
+litellm_settings:
+  drop_params: true                       # ignore unsupported params per-model
+  set_verbose: false
+  success_callback: []
+  failure_callback: []
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL  # optional: PostgreSQL for spend tracking
+  disable_spend_logs: false
+
+# ── Budget Guards ─────────────────────────────────────────────────────────────
+# Prevents runaway spend. Adjust as usage patterns solidify.
+budget_config:
+  max_budget: 500              # USD / month hard cap
+  budget_duration: 1mo
+  token_budget_reset_at: "2026-04-01T00:00:00Z"

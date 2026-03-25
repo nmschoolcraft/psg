@@ -1,0 +1,49 @@
+# Supabase project configuration for portal.psgweb.me v2
+# https://supabase.com/docs/reference/cli/config
+
+[project]
+project_id = "psg-portal"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "https://portal.psgweb.me"
+additional_redirect_urls = ["http://localhost:3000", "https://portal.psgweb.me"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = false          # Invite-only / magic link only
+enable_anonymous_sign_ins = false
+# Magic link is the only allowed sign-in method
+[auth.email]
+enable_signup = false
+enable_confirmations = true
+secure_password_change = false
+[auth.sms]
+enable_signup = false
+
+[auth.hook.custom_access_token]
+enabled = true
+uri = "pg-functions://postgres/public/custom_access_token_hook"
+secrets = ".env.secrets"
+
+[functions.onboarding-recovery]
+verify_jwt = true
+
+[functions.post-repair-followup]
+verify_jwt = true

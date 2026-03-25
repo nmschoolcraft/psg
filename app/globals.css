@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 250 248 243; /* canvas-100 */
+    --foreground: 25 30 43;    /* iron-900 */
+  }
+
+  body {
+    @apply bg-canvas-100 text-iron-900 font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display;
+  }
+}

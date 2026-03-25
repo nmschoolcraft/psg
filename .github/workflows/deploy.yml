@@ -1,0 +1,74 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Vercel (Production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://portal.psgweb.me
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+          working-directory: ./
+
+      - name: Upload Sentry source maps
+        run: |
+          npx @sentry/cli releases new "${{ github.sha }}"
+          npx @sentry/cli releases set-commits "${{ github.sha }}" --auto
+          npx @sentry/cli releases files "${{ github.sha }}" upload-sourcemaps .next --url-prefix '~/_next'
+          npx @sentry/cli releases finalize "${{ github.sha }}"
+          npx @sentry/cli releases deploys "${{ github.sha }}" new -e production
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+
+  deploy-preview:
+    name: Deploy Preview (PR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy Preview to Vercel
+        uses: amondnet/vercel-action@v25
+        id: vercel-preview
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: ./
+
+      - name: Comment Preview URL on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Preview Deployment\n\n✅ Preview deployed: ${{ steps.vercel-preview.outputs.preview-url }}`
+            })
