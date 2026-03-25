@@ -30,22 +30,73 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Sync NEXT_PUBLIC env vars to Vercel project
+        run: |
+          # Upsert build-time env vars into Vercel project so remote
+          # build has access to them (NEXT_PUBLIC_* are baked at build time)
+          node - <<'EOF'
+          const https = require('https')
+
+          const TOKEN = process.env.VERCEL_TOKEN
+          const PROJECT_ID = process.env.VERCEL_PROJECT_ID
+          const TEAM_ID = process.env.VERCEL_ORG_ID
+
+          const vars = [
+            { key: 'NEXT_PUBLIC_SUPABASE_URL', value: process.env.SUPABASE_URL_VAL },
+            { key: 'NEXT_PUBLIC_SUPABASE_ANON_KEY', value: process.env.SUPABASE_ANON_VAL },
+            { key: 'NEXT_PUBLIC_APP_URL', value: 'https://portal.psgweb.me' },
+          ]
+
+          async function upsertEnvVar(v) {
+            const teamParam = TEAM_ID.startsWith('team_') ? `?teamId=${TEAM_ID}` : ''
+
+            // First list existing env vars to find the ID if it exists
+            const list = await req('GET', `/v9/projects/${PROJECT_ID}/env${teamParam}`)
+            const existing = (list.envs || []).find(e => e.key === v.key && e.target && e.target.includes('production'))
+
+            if (existing) {
+              // PATCH to update
+              await req('PATCH', `/v9/projects/${PROJECT_ID}/env/${existing.id}${teamParam}`, { value: v.value, target: ['production'] })
+              console.log(`Updated ${v.key}`)
+            } else {
+              // POST to create
+              await req('POST', `/v9/projects/${PROJECT_ID}/env${teamParam}`, { key: v.key, value: v.value, target: ['production'], type: 'plain' })
+              console.log(`Created ${v.key}`)
+            }
+          }
+
+          function req(method, path, body) {
+            return new Promise((resolve, reject) => {
+              const options = {
+                hostname: 'api.vercel.com',
+                path,
+                method,
+                headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+              }
+              const r = https.request(options, res => {
+                let d = ''
+                res.on('data', c => d += c)
+                res.on('end', () => {
+                  try { resolve(JSON.parse(d)) } catch { resolve(d) }
+                })
+              })
+              r.on('error', reject)
+              if (body) r.write(JSON.stringify(body))
+              r.end()
+            })
+          }
+
+          Promise.all(vars.map(upsertEnvVar)).then(() => {
+            console.log('All env vars synced')
+          }).catch(e => {
+            console.error('Env sync error (non-fatal):', e.message)
+          })
+          EOF
         env:
-          NODE_ENV: development
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          SUPABASE_URL_VAL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_VAL: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
-      - name: Pull Vercel project settings
-        run: npx vercel@latest pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Build
-        run: npx vercel@latest build --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_APP_URL: https://portal.psgweb.me
-
-      - name: Deploy
-        run: npx vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy (remote build on Vercel)
+        run: npx vercel@latest --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
