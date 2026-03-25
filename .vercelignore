@@ -1,0 +1,15 @@
+# Non-portal directories — exclude from Vercel deployment
+# (api, supabase, ai-infra have their own package.json files which
+# would confuse Vercel's monorepo detection)
+api/
+supabase/
+ai-infra/
+bigquery/
+infra/
+agents/
+design/
+PSG-Server-Ops-Runbook.md
+
+# Build artifacts that should not be uploaded
+.next/
+node_modules/
