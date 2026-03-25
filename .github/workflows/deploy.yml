@@ -30,81 +30,41 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
-      - name: Sync NEXT_PUBLIC env vars to Vercel project
-        run: |
-          node - <<'EOF'
-          const https = require('https')
-
-          const TOKEN = process.env.VERCEL_TOKEN
-          const PROJECT_ID = process.env.VERCEL_PROJECT_ID
-          const TEAM_ID = process.env.VERCEL_ORG_ID
-
-          const vars = [
-            { key: 'NEXT_PUBLIC_SUPABASE_URL', value: process.env.SUPABASE_URL_VAL },
-            { key: 'NEXT_PUBLIC_SUPABASE_ANON_KEY', value: process.env.SUPABASE_ANON_VAL },
-            { key: 'NEXT_PUBLIC_APP_URL', value: 'https://portal.psgweb.me' },
-          ]
-
-          async function upsertEnvVar(v) {
-            const teamParam = TEAM_ID && TEAM_ID.startsWith('team_') ? `?teamId=${TEAM_ID}` : ''
-            const list = await req('GET', `/v9/projects/${PROJECT_ID}/env${teamParam}`)
-            const existing = (list.envs || []).find(e => e.key === v.key && e.target && e.target.includes('production'))
-            if (existing) {
-              await req('PATCH', `/v9/projects/${PROJECT_ID}/env/${existing.id}${teamParam}`, { value: v.value, target: ['production'] })
-              console.log(`Updated ${v.key}`)
-            } else {
-              await req('POST', `/v9/projects/${PROJECT_ID}/env${teamParam}`, { key: v.key, value: v.value, target: ['production'], type: 'plain' })
-              console.log(`Created ${v.key}`)
-            }
-          }
-
-          function req(method, path, body) {
-            return new Promise((resolve, reject) => {
-              const options = {
-                hostname: 'api.vercel.com', path, method,
-                headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
-              }
-              const r = https.request(options, res => {
-                let d = ''
-                res.on('data', c => d += c)
-                res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve(d) } })
-              })
-              r.on('error', reject)
-              if (body) r.write(JSON.stringify(body))
-              r.end()
-            })
-          }
-
-          Promise.all(vars.map(upsertEnvVar))
-            .then(() => console.log('All env vars synced'))
-            .catch(e => console.error('Env sync error (non-fatal):', e.message))
-          EOF
+      - name: Install dependencies
+        run: npm ci
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          SUPABASE_URL_VAL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_ANON_VAL: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NODE_ENV: development
 
-      - name: Deploy (remote build on Vercel)
-        id: vercel-deploy
+      - name: Pull Vercel project config
+        run: npx vercel@latest pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build (local — secrets available here)
+        run: npx vercel@latest build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_APP_URL: https://portal.psgweb.me
+
+      - name: Deploy prebuilt to Vercel
+        id: deploy
         run: |
-          npx vercel@latest --prod --yes --token=${{ secrets.VERCEL_TOKEN }} \
-            2>&1 | tee /tmp/vercel_output.txt
+          npx vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} \
+            2>&1 | tee /tmp/deploy_output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         continue-on-error: true
 
-      - name: Report deploy result (success or error)
+      - name: Report result
         if: always()
         run: |
-          OUTPUT=$(cat /tmp/vercel_output.txt 2>/dev/null | tail -80)
+          OUTPUT=$(cat /tmp/deploy_output.txt 2>/dev/null | tail -60)
           SHA="${{ github.sha }}"
-          STATUS="${{ steps.vercel-deploy.outputs.exit_code }}"
-          MSG="[$SHA] exit=$STATUS\n$OUTPUT"
-          # Post to ntfy.sh topic for debugging
-          printf '%s' "$MSG" | curl -s -X POST "https://ntfy.sh/psg-vercel-deploy-8x7k2" \
-            -H "Content-Type: text/plain" \
-            --data-binary @- || true
+          STATUS="${{ steps.deploy.outputs.exit_code }}"
+          printf '[%s] exit=%s\n%s' "$SHA" "$STATUS" "$OUTPUT" \
+            | curl -s -X POST "https://ntfy.sh/psg-vercel-deploy-8x7k2" \
+              -H "Content-Type: text/plain" --data-binary @- || true
 
       - name: Fail if deploy failed
-        if: steps.vercel-deploy.outputs.exit_code != '0'
+        if: steps.deploy.outputs.exit_code != '0'
         run: exit 1
