@@ -4,6 +4,20 @@ import { NextResponse, type NextRequest } from 'next/server'
 const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/health']
 
 export async function middleware(request: NextRequest) {
+  // Temporary: surface errors instead of crashing with MIDDLEWARE_INVOCATION_FAILED
+  try {
+    return await middlewareImpl(request)
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+    console.error('[middleware] unhandled error:', msg)
+    // Allow public paths through; redirect everything else to login
+    const { pathname } = request.nextUrl
+    if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) return NextResponse.next()
+    return NextResponse.redirect(new URL(`/login`, request.url))
+  }
+}
+
+async function middlewareImpl(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -42,6 +56,7 @@ export async function middleware(request: NextRequest) {
 
   return supabaseResponse
 }
+// end middlewareImpl
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
