@@ -37,6 +37,60 @@ jobs:
         env:
           NODE_ENV: development
 
+      - name: Sync runtime env vars to Vercel project
+        run: |
+          node - <<'EOF'
+          const https = require('https')
+          const TOKEN = process.env.VERCEL_TOKEN
+          const PROJECT_ID = process.env.VERCEL_PROJECT_ID
+          const TEAM_ID = process.env.VERCEL_ORG_ID
+          const teamParam = TEAM_ID && TEAM_ID.startsWith('team_') ? `?teamId=${TEAM_ID}` : ''
+
+          const vars = [
+            { key: 'NEXT_PUBLIC_SUPABASE_URL', value: process.env.SUPABASE_URL_VAL },
+            { key: 'NEXT_PUBLIC_SUPABASE_ANON_KEY', value: process.env.SUPABASE_ANON_VAL },
+            { key: 'NEXT_PUBLIC_APP_URL', value: 'https://portal.psgweb.me' },
+          ]
+
+          function req(method, path, body) {
+            return new Promise((resolve, reject) => {
+              const options = {
+                hostname: 'api.vercel.com', path, method,
+                headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+              }
+              const r = https.request(options, res => {
+                let d = ''
+                res.on('data', c => d += c)
+                res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve({}) } })
+              })
+              r.on('error', reject)
+              if (body) r.write(JSON.stringify(body))
+              r.end()
+            })
+          }
+
+          async function main() {
+            const list = await req('GET', `/v9/projects/${PROJECT_ID}/env${teamParam}`)
+            for (const v of vars) {
+              const existing = (list.envs || []).find(
+                e => e.key === v.key && e.target && e.target.includes('production')
+              )
+              if (existing) {
+                await req('PATCH', `/v9/projects/${PROJECT_ID}/env/${existing.id}${teamParam}`, { value: v.value, target: ['production'] })
+                console.log(`Updated ${v.key}`)
+              } else {
+                await req('POST', `/v9/projects/${PROJECT_ID}/env${teamParam}`, { key: v.key, value: v.value, target: ['production'], type: 'plain' })
+                console.log(`Created ${v.key}`)
+              }
+            }
+          }
+          main().catch(e => { console.error('Env sync error:', e.message); process.exit(1) })
+          EOF
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          SUPABASE_URL_VAL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_VAL: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
       - name: Pull Vercel project config
         run: npx vercel@latest pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
