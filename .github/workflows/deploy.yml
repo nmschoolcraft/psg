@@ -34,7 +34,7 @@ jobs:
           NODE_ENV: development
 
       - name: Build (Vercel)
-        run: npx vercel build --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
+        run: npx vercel@latest build --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -44,7 +44,15 @@ jobs:
           NEXT_PUBLIC_APP_URL: https://portal.psgweb.me
 
       - name: Deploy prebuilt to Vercel
-        run: npx vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
+        run: npx vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} --yes 2>&1
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Verify deployment
+        run: |
+          echo "Waiting for deployment to propagate..."
+          sleep 30
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://portal.psgweb.me/api/health)
+          echo "Health check: $STATUS"
+          [ "$STATUS" = "200" ] && echo "LIVE" || echo "Not yet (DNS propagation may take a moment)"
