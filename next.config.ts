@@ -28,21 +28,4 @@ const nextConfig: NextConfig = {
   },
 }
 
-// Only wrap with Sentry if configured (avoids build failures before Sentry is set up)
-async function buildConfig() {
-  if (process.env.SENTRY_ORG && process.env.SENTRY_PROJECT) {
-    const { withSentryConfig } = await import('@sentry/nextjs')
-    return withSentryConfig(nextConfig, {
-      org: process.env.SENTRY_ORG,
-      project: process.env.SENTRY_PROJECT,
-      silent: !process.env.CI,
-      widenClientFileUpload: true,
-      hideSourceMaps: true,
-      disableLogger: true,
-      automaticVercelMonitors: true,
-    })
-  }
-  return nextConfig
-}
-
-export default buildConfig()
+export default nextConfig
