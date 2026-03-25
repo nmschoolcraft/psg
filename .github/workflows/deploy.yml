@@ -44,15 +44,26 @@ jobs:
           NEXT_PUBLIC_APP_URL: https://portal.psgweb.me
 
       - name: Deploy prebuilt to Vercel
-        run: npx vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} --yes 2>&1
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
-      - name: Verify deployment
+        id: deploy
+        continue-on-error: true
         run: |
-          echo "Waiting for deployment to propagate..."
-          sleep 30
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://portal.psgweb.me/api/health)
-          echo "Health check: $STATUS"
-          [ "$STATUS" = "200" ] && echo "LIVE" || echo "Not yet (DNS propagation may take a moment)"
+          set -o pipefail
+          npx vercel@latest deploy --prebuilt --prod \
+            --token=${{ secrets.VERCEL_TOKEN }} \
+            --yes \
+            --debug 2>&1 | tee /tmp/vercel-deploy.log
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+
+      - name: Show deploy output (always)
+        if: always()
+        run: |
+          echo "=== VERCEL DEPLOY LOG ==="
+          cat /tmp/vercel-deploy.log 2>/dev/null || echo "(no log)"
+          echo "=== ENV CHECK (no secrets) ==="
+          echo "VERCEL_ORG_ID set: ${{ secrets.VERCEL_ORG_ID != '' }}"
+          echo "VERCEL_PROJECT_ID set: ${{ secrets.VERCEL_PROJECT_ID != '' }}"
+          echo "VERCEL_TOKEN set: ${{ secrets.VERCEL_TOKEN != '' }}"
+
+      - name: Fail if deploy failed
+        if: steps.deploy.outcome == 'failure'
+        run: exit 1
