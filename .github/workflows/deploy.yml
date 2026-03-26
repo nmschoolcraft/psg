@@ -43,7 +43,8 @@ jobs:
           for KEY_VALUE in \
             "NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL_VAL" \
             "NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_VAL" \
-            "NEXT_PUBLIC_APP_URL=https://portal.psgweb.me"; do
+            "NEXT_PUBLIC_APP_URL=https://portal.psgweb.me" \
+            "GOOGLE_SERVICE_ACCOUNT_JSON=$GOOGLE_SA_VAL"; do
             KEY="${KEY_VALUE%%=*}"
             VALUE="${KEY_VALUE#*=}"
             # Remove existing then re-add (vercel env add fails if already set)
@@ -59,6 +60,7 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           SUPABASE_URL_VAL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_ANON_VAL: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          GOOGLE_SA_VAL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
 
       - name: Pull Vercel project config
         run: npx vercel@latest pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
