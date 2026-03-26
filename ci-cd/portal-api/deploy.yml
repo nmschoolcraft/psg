@@ -1,0 +1,93 @@
+# .github/workflows/deploy-api.yml
+# Copy this file into nmschoolcraft/psg at:
+#   .github/workflows/deploy-api.yml
+#
+# Required GitHub secrets (set in repo Settings → Secrets → Actions):
+#   DEPLOY_SSH_KEY   — private key with access to apps server (128.140.81.55)
+#   DEPLOY_HOST      — 128.140.81.55
+#   DEPLOY_USER      — root
+#   DEPLOY_PORT      — 22
+
+name: Deploy Portal API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-api-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy api/ to apps server
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script: |
+            set -e
+
+            API_DIR="/srv/dev/psg/portal/api"
+            REPO_DIR="/srv/dev/psg/portal"
+
+            echo "=== PSG Portal API Deploy — $(date -u) ==="
+            echo "Host: $(hostname)"
+            echo ""
+
+            # Pull latest code
+            cd "$REPO_DIR"
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "=== Code updated to: $(git rev-parse --short HEAD) ==="
+
+            # Build the API
+            cd "$API_DIR"
+            npm ci --production=false
+            npm run build
+
+            echo "=== Build complete ==="
+
+            # Restart PM2 process (create if not exists)
+            if pm2 describe psg-portal-api > /dev/null 2>&1; then
+              pm2 restart psg-portal-api
+            else
+              pm2 start dist/index.js --name psg-portal-api
+              pm2 save
+            fi
+
+            echo "=== PM2 restarted ==="
+            pm2 status psg-portal-api
+
+            echo ""
+            echo "=== Deploy complete ==="
+
+      - name: Smoke test
+        run: |
+          echo "Running smoke test..."
+          sleep 5
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://api.psghub.me/health 2>/dev/null || echo "000")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" = "000" ]; then
+            echo "WARNING: Could not reach api.psghub.me/health — endpoint may not exist yet"
+            echo "Add a GET /health route to confirm liveness"
+          elif [ "$STATUS" -ge 500 ]; then
+            echo "SMOKE TEST FAILED — HTTP $STATUS"
+            exit 1
+          else
+            echo "Smoke test passed (HTTP $STATUS)"
+          fi
