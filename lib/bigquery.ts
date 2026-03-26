@@ -71,7 +71,6 @@ export async function bqQuery(sql: string): Promise<Record<string, unknown>[]> {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: sql, useLegacySql: false, timeoutMs: 30000 }),
     // Next.js fetch cache: revalidate every 5 minutes
-    // @ts-expect-error next field is Next.js specific
     next: { revalidate: 300 },
   })
 
