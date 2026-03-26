@@ -22,10 +22,11 @@ Batch mode (pipe JSON array from stdin):
     cat repair_orders.json | python ai-infra/embedding_pipeline.py --batch
 
 Environment variables:
-    OPENAI_API_KEY  — OpenAI key for embeddings
-    QDRANT_URL      — Qdrant server URL (default: http://localhost:6333)
-    QDRANT_API_KEY  — Qdrant API key (optional)
-    SUPABASE_URL    — Supabase project URL
+    LITELLM_URL      — LiteLLM proxy base URL (default: http://128.140.81.55:4000)
+    LITELLM_API_KEY  — Virtual key issued by LiteLLM for this pipeline
+    QDRANT_URL       — Qdrant server URL (default: http://localhost:6333)
+    QDRANT_API_KEY   — Qdrant API key (optional)
+    SUPABASE_URL     — Supabase project URL
     SUPABASE_SERVICE_ROLE_KEY
 """
 
@@ -47,13 +48,15 @@ from supabase import create_client, Client as SupabaseClient
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+LITELLM_URL = os.environ.get("LITELLM_URL", "http://128.140.81.55:4000")
+LITELLM_API_KEY = os.environ["LITELLM_API_KEY"]
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
-EMBEDDING_MODEL = "text-embedding-3-small"
+# LiteLLM model alias defined in ai-infra/litellm_config.yaml
+EMBEDDING_MODEL = "embeddings"
 COLLECTION_NAME = "shop_content"
 BATCH_SIZE = 100  # OpenAI embedding API accepts up to 2048 inputs per request
 
@@ -105,7 +108,10 @@ class RepairOrderPayload:
 # ─── Embedding ────────────────────────────────────────────────────────────────
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    client = openai.OpenAI(
+        api_key=LITELLM_API_KEY,
+        base_url=f"{LITELLM_URL}/v1",
+    )
     response = client.embeddings.create(
         model=EMBEDDING_MODEL,
         input=texts,
